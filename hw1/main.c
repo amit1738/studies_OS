@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #define MAX_LINE 1024
 
@@ -17,7 +19,7 @@ int main(void) {
             break; // Exit on EOF or error
         }
 
-        //remove newline
+        //remove newline suffix
         command[strcspn(command, "\n")] = '\0';
 
         //exit condition
