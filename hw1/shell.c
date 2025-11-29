@@ -94,7 +94,10 @@ int main(void) {
                 if (execvp(args[0], args) == -1) { //TODO: when redy will change to external execution function wirh process management
                     //if execvp fails
                     print_error_systemcall(args[0], errno); //TODO: mabey implement inside external execution function
-            } else {
+                    return -1;
+                }
+            }
+            else {
                 //parent process
                 wait(NULL); //wait for child to finish
             }
