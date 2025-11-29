@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+#include "error_handling.h"
 #include "internal.h"
 
 //TODO: define all constraints from requirements. like args
@@ -92,7 +93,7 @@ int main(void) {
                 //child process
                 execvp(args[0], args);
                 //if execvp fails
-                fprintf(stderr, "Error executing command '%s': %s\n", args[0], strerror(errno));
+                print_error_systemcall(args[0], errno); //TODO: mabey implement inside external execution function
                 return 1;
             } else {
                 //parent process
