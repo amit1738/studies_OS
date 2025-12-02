@@ -19,10 +19,10 @@ void execute_external_command(char **args, int is_background, const char *origin
 // Check if any background processes have finished (zombies) and reap them
 void check_and_reap_background_jobs();
 
-// Print the list of current background jobs (for 'jobs' command)
-void print_jobs();
-
 // Wait for all background jobs to finish and free memory (for 'exit')
 void cleanup_jobs();
+
+// Expose global jobs array for jobs command in internal.c
+extern Job background_jobs[MAX_BACKGROUND_JOBS];
 
 #endif // PROCESS_CONTROL_H
