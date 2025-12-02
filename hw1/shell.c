@@ -8,6 +8,8 @@
 #include "internal.h"
 #include "process_control.h" // Added include
 
+#define ARGS_MAX 64
+
 // parse command into arguments
 // returns: number of arguments parsed
 int parse_args(char *input, char **args) {
@@ -76,7 +78,7 @@ int main(void) {
         // Remove newline from copy manually for the jobs display
         command_copy[strcspn(command_copy, "\n")] = '\0';
 
-        char *args[MAX_LINE / 2 + 1]; 
+        char *args[ARGS_MAX]; 
         int arg_count;
         int result = handle_input(command, args, &arg_count);
         

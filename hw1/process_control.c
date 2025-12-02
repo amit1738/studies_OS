@@ -60,12 +60,11 @@ void execute_external_command(char **args, int is_background, const char *origin
     } 
     else if (pid == 0) {
         // --- Child Process ---
-        if (execvp(args[0], args) == -1) {
-            print_error_systemcall("execvp", errno);
-            // Guidelines say: display invalid command message
-            printf("hw1shell: invalid command\n"); 
-            exit(1);
-        }
+        execvp(args[0], args);
+        // If we reach here, execvp failed
+        print_error_systemcall("execvp", errno);
+        printf("hw1shell: invalid command\n"); 
+        exit(1);
     } 
     else {
         // --- Parent Process ---
@@ -107,14 +106,7 @@ void check_and_reap_background_jobs() {
     }
 }
 
-void print_jobs() {
-    for (int i = 0; i < MAX_BACKGROUND_JOBS; i++) {
-        if (background_jobs[i].pid != 0) {
-            // Format: PID \t Command (Section 4)
-            printf("%d\t%s\n", background_jobs[i].pid, background_jobs[i].command_line);
-        }
-    }
-}
+
 
 void cleanup_jobs() {
     // Used on exit: wait for all background jobs (Section 2)

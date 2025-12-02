@@ -33,7 +33,15 @@ int execute_internal(char **args, int arg_count) {
     
     // jobs command implementation
     if (strcmp(args[0], "jobs") == 0) {
-        print_jobs(); // Call the function from process_control.c
+        // Access background_jobs from process_control.c
+        extern Job background_jobs[MAX_BACKGROUND_JOBS];
+        
+        for (int i = 0; i < MAX_BACKGROUND_JOBS; i++) {
+            if (background_jobs[i].pid != 0) {
+                // Format: PID \t Command (Section 4)
+                printf("%d\t%s\n", background_jobs[i].pid, background_jobs[i].command_line);
+            }
+        }
         return 0;
     }
     
