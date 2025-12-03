@@ -60,6 +60,9 @@ int main(void) {
     char command_copy[MAX_LINE]; 
     
     while(1) {
+        // Check for finished background jobs BEFORE printing prompt
+        check_and_reap_background_jobs();
+        
         // Display prompt and wait for input
         printf("hw1shell$ ");
         fflush(stdout);
@@ -88,9 +91,17 @@ int main(void) {
         
         if (result == 2) {
             // Built-in command (cd or jobs)
+            if (strcmp(args[0], "jobs") == 0) {
+                printf("\n");  // Move to next line before jobs output
+                fflush(stdout);
+            }
             execute_internal(args, arg_count);
+            // Ensure we're on a new line before next prompt
+            fflush(stdout);
         } else if (result == 3) { 
             // External command
+            printf("\n");  // Move to next line before external command output
+            fflush(stdout);
             int is_background = 0;
 
             // Check if the last argument is "&"
@@ -101,10 +112,7 @@ int main(void) {
 
             execute_external_command(args, is_background, command_copy);
         }
-        // result == 0 (empty input) falls through to reaping
-
-        // Check for finished background jobs after every iteration
-        check_and_reap_background_jobs();
+        // result == 0 (empty input) falls through - no need to check again
     }
     
     return 0;

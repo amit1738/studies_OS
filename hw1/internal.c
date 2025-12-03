@@ -22,6 +22,7 @@ int execute_internal(char **args, int arg_count) {
             print_error_systemcall("chdir", errno);
             return -1;
         }
+        printf("\n");  // Ensure next prompt is on a new line
         return 0;
     }
     
