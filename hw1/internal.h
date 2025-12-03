@@ -1,8 +1,7 @@
 #ifndef INTERNAL_H
 #define INTERNAL_H
 
-// Execute internal commands (cd, jobs)
-// Returns: 0 = success, -1 = error
+// Execute built-in shell commands (cd, jobs)
 int execute_internal(char **args, int arg_count);
 
 #endif // INTERNAL_H
