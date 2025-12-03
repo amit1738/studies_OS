@@ -6,16 +6,15 @@
 
 #include "error_handling.h"
 #include "internal.h"
-#include "process_control.h" // Added include
+#include "process_control.h"
 
 #define ARGS_MAX 64
 
-// parse command into arguments
-// returns: number of arguments parsed
+// Split input line into separate arguments
 int parse_args(char *input, char **args) {
     int arg_count = 0;
-    char *token = strtok(input, " \t"); // tokenize by space and tab
-    while (token != NULL && arg_count < MAX_LINE / 2) {
+    char *token = strtok(input, " \t");
+    while (token != NULL && arg_count < ARGS_MAX) {
         args[arg_count] = token;
         arg_count++;
         token = strtok(NULL, " \t");
@@ -28,22 +27,22 @@ int parse_args(char *input, char **args) {
 // returns: 0 = empty, 1 = exit command, 2 = internal command, 3 = external command
 int handle_input(char *input, char **args, int *arg_count) {
     
-    // remove newline suffix
+    // Strip the newline character from input
     input[strcspn(input, "\n")] = '\0';
 
-    // check for empty input - empty or whitespace only
+    // Handle empty lines or whitespace-only input
     if (input[0] == '\0' || strspn(input, " \t") == strlen(input)) {
         return 0; // empty, continue
     }
 
-    // parse command and arguments
+    // Break command into tokens
     *arg_count = parse_args(input, args);
 
     if (*arg_count == 0) {
         return 0; // empty after parsing
     }
 
-    // classify command type
+    // Identify what type of command this is
     if (strcmp(args[0], "exit") == 0) {
         return 1; // exit command
     }
@@ -61,19 +60,18 @@ int main(void) {
     char command_copy[MAX_LINE]; 
     
     while(1) {
-        // print the prompt
+        // Display prompt and wait for input
         printf("hw1shell$ ");
         fflush(stdout);
 
-        // read user input
+        // Read user command
         if (fgets(command, sizeof(command), stdin) == NULL) { 
             printf("\n");
-            cleanup_jobs(); // Clean up on EOF
+            cleanup_jobs();
             break; 
         }
 
-        // Save a copy of the raw command string (without the \n if possible, handled in handle_input logic)
-        // Since handle_input modifies 'command' immediately, let's copy it here.
+        // Save original command for job tracking (strtok will modify command)
         strcpy(command_copy, command);
         // Remove newline from copy manually for the jobs display
         command_copy[strcspn(command_copy, "\n")] = '\0';
@@ -83,35 +81,29 @@ int main(void) {
         int result = handle_input(command, args, &arg_count);
         
         if (result == 1) {
-            // exit command
-            cleanup_jobs(); // Wait for backgrounds to finish (Section 2)
+            // User entered 'exit'
+            cleanup_jobs();
             break; 
-        } else if (result == 0) {
-            // empty input
-            continue;
-        } else if (result == 2) {
-            // internal command
+        } 
+        
+        if (result == 2) {
+            // Built-in command (cd or jobs)
             execute_internal(args, arg_count);
-        }
-        else { 
-            // result == 3: external command
+        } else if (result == 3) { 
+            // External command
             int is_background = 0;
 
             // Check if the last argument is "&"
             if (arg_count > 0 && strcmp(args[arg_count - 1], "&") == 0) {
                 is_background = 1;
-                args[arg_count - 1] = NULL; // Remove "&" from arguments passed to execvp
-                
-                // We also need to remove "&" from the command_copy string for display purposes
-                // Note: Logic to cleanly remove '&' from the string copy is tricky without complex parsing,
-                // but usually acceptable to just leave it or use a simple strrchr check.
-                // For this homework, keeping the original string (even with &) in the jobs list is often fine.
+                args[arg_count - 1] = NULL;
             }
 
             execute_external_command(args, is_background, command_copy);
         }
+        // result == 0 (empty input) falls through to reaping
 
-        // At the end of every loop iteration, check for finished background jobs (Section 12)
+        // Check for finished background jobs after every iteration
         check_and_reap_background_jobs();
     }
     

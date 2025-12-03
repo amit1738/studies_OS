@@ -18,17 +18,15 @@ void add_job(pid_t pid, const char *command_line) {
     for (int i = 0; i < MAX_BACKGROUND_JOBS; i++) {
         if (background_jobs[i].pid == 0) {
             background_jobs[i].pid = pid;
-            background_jobs[i].command_line = strdup(command_line); // Save copy of command
+            background_jobs[i].command_line = strdup(command_line); // Save copy of command for print in "jobs" command.
             if (background_jobs[i].command_line == NULL) {
-                // print_error_systemcall("strdup", errno);
-                background_jobs[i].pid = 0; // Cancel the slot reservation
-                return; // Return early on error
+                background_jobs[i].pid = 0;
+                return;
             }
             active_jobs_count++;
             return;
         }
     }
-    // Implicit return here if loop finishes (should never happen)
 }
 
 // Helper: Remove a job from the list
@@ -57,25 +55,25 @@ void execute_external_command(char **args, int is_background, const char *origin
 
     if (pid < 0) {
         print_error_systemcall("fork", errno);
+        return;
     } 
     else if (pid == 0) {
         // --- Child Process ---
         execvp(args[0], args);
-        // If we reach here, execvp failed
-        print_error_systemcall("execvp", errno);
+        // Only reached if execvp fails
+        print_error_systemcall(args[0], errno);
         printf("hw1shell: invalid command\n"); 
         exit(1);
     } 
     else {
-        // --- Parent Process ---
+        // Parent process
         if (is_background) {
-            // Background: Record job and continue (Section 9)
+            // Background job: record it and continue
             printf("hw1shell: pid %d started\n", pid);
             add_job(pid, original_line);
         } else {
-            // Foreground: Wait for this specific child (Section 8)
+            // Foreground job: wait for it to complete
             if (waitpid(pid, NULL, 0) == -1) {
-                // Ignore interruption by signal, report other errors
                 if (errno != EINTR) {
                     print_error_systemcall("waitpid", errno);
                 }
@@ -86,16 +84,15 @@ void execute_external_command(char **args, int is_background, const char *origin
 
 void check_and_reap_background_jobs() {
     pid_t pid;
-    int status;
     
-    // Check all slots for finished processes (Section 12)
+    // Check each background job to see if it finished
     for (int i = 0; i < MAX_BACKGROUND_JOBS; i++) {
         if (background_jobs[i].pid > 0) {
-            // WNOHANG is critical: don't block if child is still running
-            pid = waitpid(background_jobs[i].pid, &status, WNOHANG);
+            // Use WNOHANG to check without blocking
+            pid = waitpid(background_jobs[i].pid, NULL, WNOHANG);
             
             if (pid > 0) {
-                // Child finished
+                // Process finished - reap it and free the slot
                 printf("hw1shell: pid %d finished\n", pid);
                 remove_job(pid);
             }
@@ -109,7 +106,7 @@ void check_and_reap_background_jobs() {
 
 
 void cleanup_jobs() {
-    // Used on exit: wait for all background jobs (Section 2)
+    // Wait for all background jobs before shell exits
     for (int i = 0; i < MAX_BACKGROUND_JOBS; i++) {
         if (background_jobs[i].pid != 0) {
             waitpid(background_jobs[i].pid, NULL, 0);
