@@ -19,12 +19,14 @@ int execute_internal(char **args, int arg_count) {
             // go up one directory
             if (chdir("..") != 0) {
                 print_error_systemcall("chdir", errno);
+                printf("hw1shell: invalid command\n");
                 return -1;
             }
         } else {
             // change to specified directory
             if (chdir(args[1]) != 0) {
                 print_error_systemcall("chdir", errno);
+                printf("hw1shell: invalid command\n");
                 return -1;
             }
         }
