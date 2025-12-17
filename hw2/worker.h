@@ -1,50 +1,41 @@
+/*
+ * worker.h - Worker thread interface
+ */
+
 #ifndef WORKER_H
 #define WORKER_H
 
 #include <pthread.h>
-#include <stdio.h>
 
-/* --- Data Structures --- */
-
-// The Job structure for the linked list queue
+/* Job node for the queue */
 typedef struct Job {
-    char *cmd_line;       // The full command string (e.g., "msleep 10; increment 5")
-    long long read_time;  // Time (ms) when dispatcher read this line (for stats)
-    struct Job *next;     // Pointer to the next job in the queue
+    char *cmd;              // command string (everything after "worker ")
+    long long submit_time;  // when dispatcher read this line
+    struct Job *next;
 } Job;
 
-/* --- Shared Variables (Must be defined in main.c) --- */
+/* Shared globals - defined in dispatcher.c */
+extern pthread_mutex_t queue_lock;
+extern pthread_cond_t queue_cond;
+extern pthread_cond_t done_cond;
+extern Job *queue_head;
+extern Job *queue_tail;
+extern int done;
+extern int active_jobs;
 
-// Queue Synchronization
-extern pthread_mutex_t queue_lock; // before worker checks the queue, he needs to lock this so other workers/dispatcher won't be able to modify the queue.
-extern pthread_cond_t queue_cond; // if the queue 
-extern pthread_cond_t completion_cond; // To signal dispatcher when active_jobs reaches 0
-extern Job *job_queue_head;   // Head of the linked list
-extern Job *job_queue_tail;   // Tail of the linked list (added for O(1) enqueue)
-extern int dispatcher_done;   // Flag: 0 = running, 1 = dispatcher finished reading and we can exit the workers(threads)
-extern int active_jobs;       // Count of jobs currently in queue or processing
-
-// Statistics Synchronization
 extern pthread_mutex_t stats_lock;
-extern long long sum_turnaround; // Sum of all job turnaround times
-extern long long min_turnaround;
-extern long long max_turnaround;
-extern long long total_jobs_done;
+extern long long stats_sum;
+extern long long stats_min;
+extern long long stats_max;
+extern long long stats_count;
 
-// File Handling & Config
-extern pthread_mutex_t file_locks[]; // Array of mutexes (one per counter file)
-extern int log_enabled;              // 1 = write logs, 0 = silent
-extern long long program_start_time; // Program start time for relative timestamps
+extern pthread_mutex_t counter_locks[];
+extern int log_enabled;
+extern long long start_time;
 
-/* --- Function Prototypes --- */
-
-// Initializes worker threads
-void init_workers(int num_threads);
-
-// Waits for all worker threads to finish and cleans up
-void join_workers(int num_threads);
-
-// The main loop for the worker thread (internal use, but needed for pthread_create)
-void* worker_function(void* arg);
+/* Functions */
+long long get_time_ms(void);
+void init_workers(int n);
+void join_workers(int n);
 
 #endif
