@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <ctype.h>
 
 #define MAX_CMD_LEN 1024
 #define MAX_SUB_CMDS 100 // Max number of basic commands in one line
@@ -17,7 +18,8 @@ int *worker_indices = NULL;
 long long get_time_ms() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+    long long current = (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+    return current - program_start_time;
 }
 
 // Thread-safe update of counter files (counters are 0-99)
@@ -38,6 +40,8 @@ void update_counter_file(int counter_id, int change) {
             val += change;
             rewind(f); // Move cursor back to start
             fprintf(f, "%lld", val);
+            fflush(f); // Flush to ensure write
+            ftruncate(fileno(f), ftell(f)); // Truncate to current position
         }
         fclose(f);
     } else {
@@ -50,25 +54,25 @@ void update_counter_file(int counter_id, int change) {
 
 // Parse and execute a single basic command (e.g., "msleep 50")
 void execute_basic_cmd(char *cmd) {
-    char *saveptr;
-    // Work on a copy because strtok modifies the string
+    // Minimal change: use strtok_r with space+tab delimiters and tolerate missing args
     char cmd_copy[MAX_CMD_LEN];
     strncpy(cmd_copy, cmd, MAX_CMD_LEN);
+    cmd_copy[MAX_CMD_LEN - 1] = '\0';
 
-    // Parse: type argument (e.g., "increment" "5")
-    char *type = strtok_r(cmd_copy, " ", &saveptr);
-    char *arg_str = strtok_r(NULL, " ", &saveptr);
+    char *saveptr;
+    char *type = strtok_r(cmd_copy, " \t", &saveptr);
+    char *arg_str = strtok_r(NULL, " \t", &saveptr);
 
-    if (!type || !arg_str) return;
-
-    int arg = atoi(arg_str);
+    if (!type) return;
+    int has_arg = (arg_str != NULL);
+    int arg = has_arg ? atoi(arg_str) : 0;
 
     if (strcmp(type, "msleep") == 0) {
-        usleep(arg * 1000); // usleep takes microseconds, input is ms
+        if (has_arg && arg > 0) usleep(arg * 1000);
     } else if (strcmp(type, "increment") == 0) {
-        update_counter_file(arg, 1); //
+        if (has_arg) update_counter_file(arg, 1);
     } else if (strcmp(type, "decrement") == 0) {
-        update_counter_file(arg, -1); //
+        if (has_arg) update_counter_file(arg, -1);
     }
 }
 
@@ -88,8 +92,8 @@ void process_job_line(char *line) {
     // Split by semicolon
     char *token = strtok_r(line_copy, ";", &saveptr);
     while (token != NULL && cmd_count < MAX_SUB_CMDS) {
-        // Skip leading spaces for cleaner parsing
-        while (*token == ' ') token++;
+        // Skip leading whitespace (spaces/tabs)
+        while (*token && isspace((unsigned char)*token)) token++;
         commands[cmd_count++] = token;
         token = strtok_r(NULL, ";", &saveptr);
     }
@@ -192,7 +196,9 @@ void* worker_function(void* arg) {
             // Decrement active jobs (for dispatcher wait)
             pthread_mutex_lock(&queue_lock);
             active_jobs--;
-            pthread_cond_signal(&queue_cond); // Signal dispatcher if it's waiting
+            if (active_jobs == 0) {
+                pthread_cond_signal(&completion_cond);
+            }
             pthread_mutex_unlock(&queue_lock);
 
             // 7. Cleanup Job Memory

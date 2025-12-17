@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <sys/time.h>
+#include <ctype.h>
 #include "queue.h"
 #include "worker.h"
 
@@ -13,6 +14,7 @@
 // --- Global Variables Definition ---
 pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t completion_cond = PTHREAD_COND_INITIALIZER;
 Job *job_queue_head = NULL;
 Job *job_queue_tail = NULL;
 int dispatcher_done = 0;
@@ -26,13 +28,15 @@ long long total_jobs_done = 0;
 
 pthread_mutex_t file_locks[100];
 int log_enabled = 0;
+long long program_start_time = 0;
 
 // --- Helper Functions ---
 
 long long get_time_ms_dispatcher() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+    long long current = (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+    return current - program_start_time;
 }
 
 void init_counter_files(int num_counters) {
@@ -78,10 +82,14 @@ void read_instruction_file(const char *filename) {
         char cmd_type[32];
         int ms_arg;
 
+        // Pointer for parsing that skips leading whitespace, without altering original line
+        char *p = line;
+        while (*p && isspace((unsigned char)*p)) p++;
+
         // 1. Worker Job
-        if (strncmp(line, "worker", 6) == 0) {
+        if (strncmp(p, "worker", 6) == 0) {
             // Skip "worker" and whitespace
-            char *args = line + 6;
+            char *args = p + 6;
             while (*args == ' ' || *args == '\t') args++;
             
             pthread_mutex_lock(&queue_lock);
@@ -91,13 +99,13 @@ void read_instruction_file(const char *filename) {
             pthread_mutex_unlock(&queue_lock);
         } 
         // 2. Dispatcher Command
-        else if (sscanf(line, "%s %d", cmd_type, &ms_arg) >= 1) {
+        else if (sscanf(p, "%s %d", cmd_type, &ms_arg) >= 1) {
             if (strcmp(cmd_type, "dispatcher_msleep") == 0) {
                 usleep(ms_arg * 1000);
             } else if (strcmp(cmd_type, "dispatcher_wait") == 0) {
                 pthread_mutex_lock(&queue_lock);
                 while (active_jobs > 0) {
-                    pthread_cond_wait(&queue_cond, &queue_lock);
+                    pthread_cond_wait(&completion_cond, &queue_lock);
                 }
                 pthread_mutex_unlock(&queue_lock);
             }
@@ -140,9 +148,13 @@ int main(int argc, char *argv[]) {
     int num_counters = atoi(argv[3]);
     log_enabled = atoi(argv[4]);
 
-    if (num_threads > 4096) num_threads = 4096; //fixme define 
-    if (num_counters > 100) num_counters = 100;//fixme define
+    if (num_threads > 4096) num_threads = 4096;
+    if (num_counters > 100) num_counters = 100;
 
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    program_start_time = (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+    
     long long start_time = get_time_ms_dispatcher();
 
     // Initialize
@@ -155,7 +167,7 @@ int main(int argc, char *argv[]) {
     // Wait for all jobs to finish
     pthread_mutex_lock(&queue_lock);
     while (active_jobs > 0) {
-        pthread_cond_wait(&queue_cond, &queue_lock);
+        pthread_cond_wait(&completion_cond, &queue_lock);
     }
     
     // Signal workers to exit
