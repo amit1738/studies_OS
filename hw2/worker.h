@@ -19,7 +19,9 @@ typedef struct Job {
 extern pthread_mutex_t queue_lock; // before worker checks the queue, he needs to lock this so other workers/dispatcher won't be able to modify the queue.
 extern pthread_cond_t queue_cond; // if the queue 
 extern Job *job_queue_head;   // Head of the linked list
+extern Job *job_queue_tail;   // Tail of the linked list (added for O(1) enqueue)
 extern int dispatcher_done;   // Flag: 0 = running, 1 = dispatcher finished reading and we can exit the workers(threads)
+extern int active_jobs;       // Count of jobs currently in queue or processing
 
 // Statistics Synchronization
 extern pthread_mutex_t stats_lock;

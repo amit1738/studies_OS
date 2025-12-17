@@ -3,77 +3,171 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <string.h>
+#include <sys/time.h>
 #include "queue.h"
+#include "worker.h"
 
-#define num_threads 4096
-#define num_counters 100
-#define log_enabled
+#define MAX_CMD_LEN 1024
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t all_done = PTHREAD_COND_INITIALIZER;
-int active_jobs = 0;
 
-void init_counter_files() {
+// --- Global Variables Definition ---
+pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+Job *job_queue_head = NULL;
+Job *job_queue_tail = NULL;
+int dispatcher_done = 0;
+int active_jobs = 0; //fixme
+
+pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
+long long sum_turnaround = 0;
+long long min_turnaround = 0;
+long long max_turnaround = 0;
+long long total_jobs_done = 0;
+
+pthread_mutex_t file_locks[100];
+int log_enabled = 0;
+
+// --- Helper Functions ---
+
+long long get_time_ms_dispatcher() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
+}
+
+void init_counter_files(int num_counters) {
     for (int i = 0; i < num_counters; i++) {
-        char filename[11];
+        char filename[32];
         sprintf(filename, "count%02d.txt", i);
         FILE *file = fopen(filename, "w");
         if (file != NULL) {
+            fprintf(file, "0");
             fclose(file);
         }
+        pthread_mutex_init(&file_locks[i], NULL); //fixme
     }
 }
 
-void read_instruction_file(const char *filename, Queue *fifo) {
+void read_instruction_file(const char *filename) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
-        perror("Error opening file");
+        perror("Error opening command file");
         exit(EXIT_FAILURE);
     }
 
-    char line[1024];
+    FILE *dispatcher_log = NULL;
+    if (log_enabled) {
+        dispatcher_log = fopen("dispatcher.txt", "w");
+    }
+
+    char line[MAX_CMD_LEN];
     while (fgets(line, sizeof(line), file)) {
-        // Remove newline character if present
+        // Remove newline
         size_t len = strlen(line);
         if (len > 0 && line[len - 1] == '\n') {
             line[len - 1] = '\0';
         }
-
-        // Skip empty lines
         if (len == 0) continue;
 
+        // Log read command
+        if (dispatcher_log) {
+            fprintf(dispatcher_log, "TIME %lld: read cmd line: %s\n", get_time_ms_dispatcher(), line);
+            fflush(dispatcher_log);
+        }
+
         char cmd_type[32];
-        char cmd_arg[32];
         int ms_arg;
 
-        // Try to parse "worker <args>"
+        // 1. Worker Job
         if (strncmp(line, "worker", 6) == 0) {
-            pthread_mutex_lock(&lock);
-            // Skip "worker" and following whitespace
+            // Skip "worker" and whitespace
             char *args = line + 6;
             while (*args == ' ' || *args == '\t') args++;
-            enqueue(fifo, strdup(args));
+            
+            pthread_mutex_lock(&queue_lock);
+            enqueue(strdup(args), get_time_ms_dispatcher());
             active_jobs++;
-            pthread_mutex_unlock(&lock);
+            pthread_cond_signal(&queue_cond); // Wake up a worker
+            pthread_mutex_unlock(&queue_lock);
         } 
-        // Try to parse "dispatcher_<cmd> <arg>"
+        // 2. Dispatcher Command
         else if (sscanf(line, "%s %d", cmd_type, &ms_arg) >= 1) {
             if (strcmp(cmd_type, "dispatcher_msleep") == 0) {
                 usleep(ms_arg * 1000);
             } else if (strcmp(cmd_type, "dispatcher_wait") == 0) {
-                pthread_mutex_lock(&lock);
+                pthread_mutex_lock(&queue_lock);
                 while (active_jobs > 0) {
-                    pthread_cond_wait(&all_done, &lock);
+                    pthread_cond_wait(&queue_cond, &queue_lock);
                 }
-                pthread_mutex_unlock(&lock);
+                pthread_mutex_unlock(&queue_lock);
             }
         }
     }
 
+    if (dispatcher_log) fclose(dispatcher_log);
     fclose(file);
 }
 
-void main() {
-    Queue fifo;
-    init_queue(&fifo);
+void write_stats(long long total_runtime) {
+    FILE *f = fopen("stats.txt", "w");
+    if (!f) {
+        perror("Error opening stats.txt");
+        return;
+    }
+
+    double avg_turnaround = 0;
+    if (total_jobs_done > 0) {
+        avg_turnaround = (double)sum_turnaround / total_jobs_done;
+    }
+
+    fprintf(f, "total running time: %lld milliseconds\n", total_runtime);
+    fprintf(f, "sum of jobs turnaround time: %lld milliseconds\n", sum_turnaround);
+    fprintf(f, "min job turnaround time: %lld milliseconds\n", min_turnaround);
+    fprintf(f, "average job turnaround time: %f milliseconds\n", avg_turnaround);
+    fprintf(f, "max job turnaround time: %lld milliseconds\n", max_turnaround);
+
+    fclose(f);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <cmdfile> <num_threads> <num_counters> <log_enabled>\n", argv[0]);
+        return 1;
+    }
+
+    char *cmdfile = argv[1];
+    int num_threads = atoi(argv[2]);
+    int num_counters = atoi(argv[3]);
+    log_enabled = atoi(argv[4]);
+
+    if (num_threads > 4096) num_threads = 4096; //fixme define 
+    if (num_counters > 100) num_counters = 100;//fixme define
+
+    long long start_time = get_time_ms_dispatcher();
+
+    // Initialize
+    init_counter_files(num_counters);
+    init_workers(num_threads);
+
+    // Process commands
+    read_instruction_file(cmdfile);
+
+    // Wait for all jobs to finish
+    pthread_mutex_lock(&queue_lock);
+    while (active_jobs > 0) {
+        pthread_cond_wait(&queue_cond, &queue_lock);
+    }
+    
+    // Signal workers to exit
+    dispatcher_done = 1;
+    pthread_cond_broadcast(&queue_cond);
+    pthread_mutex_unlock(&queue_lock);
+
+    // Join workers
+    join_workers(num_threads);
+
+    long long end_time = get_time_ms_dispatcher();
+    write_stats(end_time - start_time);
+
+    return 0;
 }

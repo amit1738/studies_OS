@@ -2,39 +2,23 @@
 #include <stdlib.h>
 #include "queue.h"
 
-void init_queue(Queue *q) {
-    q->head = NULL;
-    q->tail = NULL;
-}
-
-void enqueue(Queue *q, char *line) {
-    Node *new_node = (Node *)malloc(sizeof(Node));
-    if (new_node == NULL) {
-        perror("Failed to allocate memory for new node");
+// Enqueue a new job to the global queue
+// Assumes the caller holds the queue_lock!
+void enqueue(char *line, long long read_time) {
+    Job *new_job = (Job *)malloc(sizeof(Job));
+    if (new_job == NULL) {
+        perror("Failed to allocate memory for new job");
         exit(EXIT_FAILURE);
     }
-    new_node->line = line;
-    new_node->next = NULL;
+    new_job->cmd_line = line;
+    new_job->read_time = read_time;
+    new_job->next = NULL;
 
-    if (q->tail == NULL) {
-        q->head = new_node;
-        q->tail = new_node;
+    if (job_queue_tail == NULL) {
+        job_queue_head = new_job;
+        job_queue_tail = new_job;
     } else {
-        q->tail->next = new_node;
-        q->tail = new_node;
+        job_queue_tail->next = new_job;
+        job_queue_tail = new_job;
     }
-}
-
-char *dequeue(Queue *q) {
-    if (q->head == NULL) {
-        return NULL;
-    }
-    Node *temp = q->head;
-    char *line = temp->line;
-    q->head = q->head->next;
-    if (q->head == NULL) {
-        q->tail = NULL;
-    }
-    free(temp);
-    return line;
 }

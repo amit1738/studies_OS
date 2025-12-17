@@ -1,18 +1,12 @@
 #ifndef QUEUE_H
 #define QUEUE_H
 
-typedef struct Node {
-    char *line;
-    struct Node *next;
-} Node;
+#include "worker.h"
 
-typedef struct {
-    Node *head;
-    Node *tail;
-} Queue;
+// We use the Job struct from worker.h as the node
+// No separate Queue struct needed if we use global head/tail, 
+// but we can keep helper functions.
 
-void init_queue(Queue *q);
-void enqueue(Queue *q, char *line);
-char *dequeue(Queue *q); // Adding dequeue for future use by workers
+void enqueue(char *line, long long read_time);
 
 #endif

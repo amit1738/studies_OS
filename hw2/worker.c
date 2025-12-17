@@ -1,4 +1,4 @@
-#include <worker.h>
+#include "worker.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -149,6 +149,9 @@ void* worker_function(void* arg) {
         // 4. Pop Job
         job = job_queue_head;
         job_queue_head = job->next;
+        if (job_queue_head == NULL) {
+            job_queue_tail = NULL;
+        }
         
         pthread_mutex_unlock(&queue_lock); // Release lock ASAP
 
@@ -186,6 +189,12 @@ void* worker_function(void* arg) {
             total_jobs_done++;
             pthread_mutex_unlock(&stats_lock);
 
+            // Decrement active jobs (for dispatcher wait)
+            pthread_mutex_lock(&queue_lock);
+            active_jobs--;
+            pthread_cond_signal(&queue_cond); // Signal dispatcher if it's waiting
+            pthread_mutex_unlock(&queue_lock);
+
             // 7. Cleanup Job Memory
             free(job->cmd_line);
             free(job);
@@ -201,3 +210,26 @@ void* worker_function(void* arg) {
 void init_workers(int num_threads) {
     // Allocate arrays to store thread handles and IDs
     worker_handles = (pthread_t*) malloc(num_threads * sizeof(pthread_t));
+    worker_indices = (int*) malloc(num_threads * sizeof(int));
+
+    if (!worker_handles || !worker_indices) {
+        perror("Failed to allocate memory for workers");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < num_threads; i++) {
+        worker_indices[i] = i;
+        if (pthread_create(&worker_handles[i], NULL, worker_function, &worker_indices[i]) != 0) {
+            perror("Failed to create worker thread");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+void join_workers(int num_threads) {
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(worker_handles[i], NULL);
+    }
+    free(worker_handles);
+    free(worker_indices);
+}
