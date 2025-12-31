@@ -1,16 +1,10 @@
-/*
- * hw3client.c - Chat Client
- * 
- * This client connects to the chat server and allows the user to:
- * - Send messages to all users (normal message)
- * - Send private messages (@name message)
- * - Exit the chat (!exit)
- * 
- * Uses select() to handle both keyboard input and server messages
- * simultaneously without blocking.
- * 
- * Usage: ./hw3client <server_ip> <port> <name>
- */
+// hw3client.c - TCP Chat Client
+//
+// Client implementation for the chat server.
+// Simultaneous handling of two input sources is required:
+// 1. User input (stdin)
+// 2. Incoming server messages (socket)
+// select() is used to monitor both file descriptors to prevent blocking.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,12 +17,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
-/* Constants as specified */
+// Constants from the spec
 #define MAX_MSG_LEN 256
 
-/*
- * Main function
- */
 int main(int argc, char *argv[]) {
     int sock_fd;
     struct sockaddr_in server_addr;
@@ -36,7 +27,6 @@ int main(int argc, char *argv[]) {
     char buffer[MAX_MSG_LEN];
     int max_fd;
     
-    /* Check command line arguments */
     if (argc != 4) {
         fprintf(stderr, "Usage: %s <server_ip> <port> <name>\n", argv[0]);
         exit(1);
@@ -46,107 +36,120 @@ int main(int argc, char *argv[]) {
     int port = atoi(argv[2]);
     char *my_name = argv[3];
     
-    /* ============================================
-     * STEP 1: Create socket and connect to server
-     * ============================================ */
+    // The socket is created
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
         perror("socket");
         exit(1);
     }
     
-    /* Prepare server address */
+    // The server address structure is set up
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     
-    /* Convert IP address from string to binary */
+    // The IP string is converted to binary
     if (inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0) {
         perror("Invalid address");
         exit(1);
     }
     
-    /* Connect to server */
+    // Connection to the server is established
     if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("connect");
         exit(1);
     }
     
-    /* ============================================
-     * STEP 2: Send our name to the server
-     * ============================================ */
+    // The client name is sent immediately upon connection
     sprintf(buffer, "%s\n", my_name);
     write(sock_fd, buffer, strlen(buffer));
     
-    /* ============================================
-     * STEP 3: Main loop - handle input and messages
-     * ============================================ */
-    
-    /* Calculate max_fd once (it doesn't change) */
+    // The max file descriptor for select() is determined
+    // sock_fd and STDIN_FILENO (0) are monitored
     if (sock_fd > STDIN_FILENO) {
         max_fd = sock_fd;
     } else {
         max_fd = STDIN_FILENO;
     }
     
+    // Buffer for user input (rapid typing is handled)
+    char input_buffer[MAX_MSG_LEN];
+    int input_len = 0;
+
+    // Main Loop
+    // Activity on either stdin or the socket is awaited.
     while (1) {
-        /* Set up the file descriptor set */
         FD_ZERO(&read_set);
-        FD_SET(STDIN_FILENO, &read_set);  /* Watch keyboard input */
-        FD_SET(sock_fd, &read_set);        /* Watch server socket */
+        FD_SET(STDIN_FILENO, &read_set);  // Keyboard is monitored
+        FD_SET(sock_fd, &read_set);       // Server is monitored
         
-        /* Wait for activity */
+        // Activity is awaited
         if (select(max_fd + 1, &read_set, NULL, NULL, NULL) < 0) {
             if (errno == EINTR) continue;
             perror("select");
             exit(1);
         }
         
-        /* ----------------------------------------
-         * Check for message from server
-         * ---------------------------------------- */
+        // Case 1: Message is received from server
         if (FD_ISSET(sock_fd, &read_set)) {
             memset(buffer, 0, MAX_MSG_LEN);
             int n = read(sock_fd, buffer, MAX_MSG_LEN - 1);
             
             if (n <= 0) {
-                /* Server disconnected */
+                // Connection closed by server
                 printf("Server disconnected.\n");
                 break;
             }
             
-            /* Display the message as-is (spec requirement) */
+            // The received message is printed
             printf("%s", buffer);
             fflush(stdout);
         }
         
-        /* ----------------------------------------
-         * Check for keyboard input from user
-         * ---------------------------------------- */
+        // Case 2: User input is detected
         if (FD_ISSET(STDIN_FILENO, &read_set)) {
-            memset(buffer, 0, MAX_MSG_LEN);
+            // Data is read from keyboard into buffer
+            int n = read(STDIN_FILENO, input_buffer + input_len, MAX_MSG_LEN - input_len - 1);
             
-            if (fgets(buffer, MAX_MSG_LEN, stdin) == NULL) {
-                /* EOF or error on stdin */
-                break;
+            if (n <= 0) {
+                break; // EOF (Ctrl+D) or error
             }
             
-            /* Check for !exit command */
-            if (strncmp(buffer, "!exit", 5) == 0) {
-                /* Send to server so others see it */
-                write(sock_fd, buffer, strlen(buffer));
+            input_len += n;
+            input_buffer[input_len] = '\0';
+            
+            // Complete lines ending in newline are processed
+            char *newline;
+            while ((newline = strchr(input_buffer, '\n')) != NULL) {
+                int msg_len = (newline - input_buffer) + 1;
                 
-                /* Print exit message as required by spec */
-                printf("client exiting\n");
-                break;
+                // The special exit command is checked
+                if (strncmp(input_buffer, "!exit", 5) == 0) {
+                    // Server is notified of departure
+                    write(sock_fd, input_buffer, msg_len);
+                    printf("client exiting\n");
+                    close(sock_fd);
+                    return 0;
+                }
+                
+                // The message is sent
+                write(sock_fd, input_buffer, msg_len);
+                
+                // Buffer is shifted if data remains
+                int remaining = input_len - msg_len;
+                memmove(input_buffer, input_buffer + msg_len, remaining);
+                input_len = remaining;
+                input_buffer[input_len] = '\0';
             }
             
-            /* Send the message to server (normal or whisper) */
-            write(sock_fd, buffer, strlen(buffer));
+            // Safety: if buffer fills without a newline, it is sent immediately
+            if (input_len >= MAX_MSG_LEN - 1) {
+                write(sock_fd, input_buffer, input_len);
+                input_len = 0;
+            }
         }
     }
     
-    /* Clean up */
     close(sock_fd);
     return 0;
 }
