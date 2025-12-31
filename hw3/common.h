@@ -12,9 +12,9 @@
 #include <sys/select.h>
 #include <errno.h>
 
-#define MAX_BUFFER 2048
-#define MAX_NAME_LEN 64
-#define MAX_CLIENTS 100
+#define MAX_BUFFER 256
+#define MAX_NAME_LEN 256
+#define MAX_CLIENTS 16
 
 // Helper to handle errors nicely
 void error(const char *msg) {
